@@ -195,7 +195,7 @@
             
             try {
                 // IMPORTANT: If you deploy to Vercel, change "http://127.0.0.1:5000" to just "" (empty string)
-                const url = `http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
+                const url = `/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
                 
                 const response = await fetch(url);
                 if (!response.ok) throw new Error("HTTP Error");
@@ -239,7 +239,7 @@
             statusMessage.style.color = "#f5a623";
             try {
                 const interval = intervalSelect.value;
-                const url = `http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
+                const url = `/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
                 
                 const response = await fetch(url);
                 const data = await response.json();
