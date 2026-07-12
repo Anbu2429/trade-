@@ -5,7 +5,6 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)  # Allow frontend to access the API
 
-# --- NEW: Added a home route to fix the 404 error ---
 @app.route('/', methods=['GET'])
 def home():
     return jsonify({
@@ -14,12 +13,11 @@ def home():
         "api_endpoint": "http://127.0.0.1:5000/api/candles?ticker=AAPL"
     })
 
-# --- EXISTING: The main data route ---
 @app.route('/api/candles', methods=['GET'])
 def get_candle_data():
     ticker = request.args.get('ticker', 'AAPL')
-    interval = request.args.get('interval', '1d')
-    period = request.args.get('period', '1mo')
+    interval = request.args.get('interval', '1d') # Frontend will pass '1d', '1wk', or '1mo'
+    period = request.args.get('period', '1y')     # Now defaults to exactly 1 year backward from today
     
     try:
         stock = yf.Ticker(ticker)

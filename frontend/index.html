@@ -11,8 +11,8 @@
         body { margin: 0; background-color: #0b0e14; color: #e1e4ea; font-family: -apple-system, sans-serif; }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         
-        .controls { margin-top: 20px; display: flex; gap: 10px; align-items: center; }
-        .search-container { position: relative; width: 400px; }
+        .controls { margin-top: 20px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .search-container { position: relative; width: 350px; }
         #ticker-search { 
             width: 100%; padding: 10px 15px; background: #1e222d; color: white; 
             border: 1px solid #363c4e; border-radius: 4px; outline: none; font-size: 14px;
@@ -20,6 +20,13 @@
         }
         #ticker-search:focus { border-color: #2962ff; }
         
+        /* NEW: Styling for the Timeframe Dropdown */
+        #interval-select {
+            padding: 10px; background: #1e222d; color: white; border: 1px solid #363c4e; 
+            border-radius: 4px; cursor: pointer; font-size: 14px; outline: none;
+        }
+        #interval-select:focus { border-color: #2962ff; }
+
         .dropdown-list {
             position: absolute; top: 100%; left: 0; right: 0; background: #1e222d;
             border: 1px solid #363c4e; border-top: none; border-radius: 0 0 4px 4px;
@@ -55,8 +62,15 @@
                 <input type="text" id="ticker-search" placeholder="Search Markets (e.g., BTC-USD, RELIANCE.NS)..." autocomplete="off">
                 <div id="search-results" class="dropdown-list"></div>
             </div>
+            
+            <select id="interval-select">
+                <option value="1d">Daily</option>
+                <option value="1wk">Weekly</option>
+                <option value="1mo">Monthly</option>
+            </select>
+
             <button id="fetch-btn">Load Chart</button>
-            <button id="download-btn">⬇ Download 1-Year Data</button>
+            <button id="download-btn">⬇ Download Data</button>
             <span id="status-message">Ready.</span>
         </div>
 
@@ -74,29 +88,19 @@
     </div>
 
     <script>
-        // CUSTOM DIRECTORY: User's Main Companies & Commodities
         const marketDatabase = [
-            // Cryptocurrencies
             { ticker: "BTC-USD", name: "Bitcoin", type: "Crypto" },
-            
-            // Indian Indices (Spot Prices - Yahoo Finance does not track Indian Futures)
             { ticker: "^NSEBANK", name: "Bank Nifty (Spot)", type: "Index" },
             { ticker: "^BSESN", name: "BSE Sensex (Spot)", type: "Index" },
             { ticker: "^NSEI", name: "Nifty 50 (Spot)", type: "Index" },
-
-            // Global Commodities (US COMEX/NYMEX Futures)
             { ticker: "CL=F", name: "Crude Oil", type: "Commodity" },
             { ticker: "NG=F", name: "Natural Gas", type: "Commodity" },
             { ticker: "HG=F", name: "Copper", type: "Commodity" },
             { ticker: "ALI=F", name: "Aluminum", type: "Commodity" },
-            
-            // Indian Equities (Including Zinc/Bio proxies)
             { ticker: "HINDZINC.NS", name: "Hindustan Zinc", type: "Equity-IN" },
             { ticker: "BIOCON.NS", name: "Biocon Limited", type: "Equity-IN" },
             { ticker: "RELIANCE.NS", name: "Reliance Industries", type: "Equity-IN" },
             { ticker: "HDFCBANK.NS", name: "HDFC Bank", type: "Equity-IN" },
-            
-            // Global Forex
             { ticker: "USDINR=X", name: "USD to INR", type: "Forex" },
             { ticker: "EURUSD=X", name: "EUR to USD", type: "Forex" }
         ];
@@ -106,11 +110,11 @@
 
         const searchInput = document.getElementById('ticker-search');
         const searchResults = document.getElementById('search-results');
+        const intervalSelect = document.getElementById('interval-select'); // NEW
         const chartElement = document.getElementById('chart-box');
         const statusMessage = document.getElementById('status-message');
         const dataBar = document.getElementById('data-bar');
         
-        // --- NEW: Global array to safely store our data for hover lookups ---
         let globalChartData = [];
         let activeTicker = "BTC-USD"; 
 
@@ -184,16 +188,21 @@
                 }
             }
 
-            statusMessage.innerText = `Fetching ${activeTicker}...`;
+            const interval = intervalSelect.value; // GET SELECTED TIMEFRAME
+
+            statusMessage.innerText = `Fetching ${interval} data for ${activeTicker}...`;
             statusMessage.style.color = "#f5a623"; 
             
             try {
-                const response = await fetch(`http://127.0.0.1:5000/api/candles?ticker=${activeTicker}`);
+                // IMPORTANT: If you deploy to Vercel, change "http://127.0.0.1:5000" to just "" (empty string)
+                const url = `http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
+                
+                const response = await fetch(url);
                 if (!response.ok) throw new Error("HTTP Error");
                 const data = await response.json();
                 
                 if(data && data.length > 0) {
-                    globalChartData = data; // Save data to our safe global variable
+                    globalChartData = data; 
                     candlestickSeries.setData(data);
                     chart.timeScale().fitContent(); 
                     
@@ -206,22 +215,18 @@
                     throw new Error("No data");
                 }
             } catch (error) {
-                statusMessage.innerText = "Error: Symbol not found by Yahoo Finance.";
+                statusMessage.innerText = "Error fetching data.";
                 statusMessage.style.color = "#ef5350"; 
             }
         }
 
-        // --- THE FIX: Bulletproof direct array lookup for hover data ---
         chart.subscribeCrosshairMove((param) => {
-            // Check if mouse is actively hovering over a valid time on the chart
             if (param.time) {
-                // Find the exact candle in our saved array matching the hover timestamp
                 const hoveredCandle = globalChartData.find(candle => candle.time === param.time);
                 if (hoveredCandle) {
                     updateMetricsBar(activeTicker, hoveredCandle);
                 }
             } else {
-                // If the mouse moves OFF the chart, safely reset the bar to the last known candle
                 if (globalChartData.length > 0) {
                     const lastCandle = globalChartData[globalChartData.length - 1];
                     updateMetricsBar(activeTicker, lastCandle);
@@ -230,10 +235,13 @@
         });
 
         document.getElementById('download-btn').addEventListener('click', async function() {
-            statusMessage.innerText = "Downloading 1-Year Report...";
+            statusMessage.innerText = "Downloading Report...";
             statusMessage.style.color = "#f5a623";
             try {
-                const response = await fetch(`http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&period=1y`);
+                const interval = intervalSelect.value;
+                const url = `http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&interval=${interval}&period=1y`;
+                
+                const response = await fetch(url);
                 const data = await response.json();
                 if(!data || data.length === 0) throw new Error("No data");
 
@@ -247,9 +255,9 @@
 
                 const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
                 const link = document.createElement("a");
-                const url = URL.createObjectURL(blob);
-                link.setAttribute("href", url);
-                link.setAttribute("download", `${activeTicker}_1_Year_Data.csv`);
+                const urlObj = URL.createObjectURL(blob);
+                link.setAttribute("href", urlObj);
+                link.setAttribute("download", `${activeTicker}_1Y_${interval}.csv`);
                 link.style.visibility = 'hidden';
                 document.body.appendChild(link);
                 link.click();
@@ -263,6 +271,8 @@
             }
         });
 
+        // Automatically update the chart when the timeframe is changed from the dropdown
+        intervalSelect.addEventListener('change', updateChartData);
         document.getElementById('fetch-btn').addEventListener('click', updateChartData);
         
         searchInput.value = "BTC-USD - Bitcoin"; 
