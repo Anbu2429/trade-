@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Trading Dashboard</title>
+    
+    <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
+    
+    <style>
+        body { margin: 0; background-color: #0b0e14; color: #e1e4ea; font-family: -apple-system, sans-serif; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        
+        .controls { margin-top: 20px; display: flex; gap: 10px; align-items: center; }
+        .search-container { position: relative; width: 400px; }
+        #ticker-search { 
+            width: 100%; padding: 10px 15px; background: #1e222d; color: white; 
+            border: 1px solid #363c4e; border-radius: 4px; outline: none; font-size: 14px;
+            box-sizing: border-box;
+        }
+        #ticker-search:focus { border-color: #2962ff; }
+        
+        .dropdown-list {
+            position: absolute; top: 100%; left: 0; right: 0; background: #1e222d;
+            border: 1px solid #363c4e; border-top: none; border-radius: 0 0 4px 4px;
+            z-index: 100; max-height: 300px; overflow-y: auto; display: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        .dropdown-item { padding: 10px 15px; cursor: pointer; color: #d1d4dc; border-bottom: 1px solid #2b2e3a; display: flex; align-items: center;}
+        .dropdown-item:hover { background: #2962ff; color: white; }
+        .dropdown-ticker { font-weight: bold; width: 100px; display: inline-block; color: #f5a623; }
+        .dropdown-type { font-size: 11px; padding: 2px 6px; background: #2b2e3a; border-radius: 4px; margin-left: auto; color: #787b86; }
+
+        button { padding: 10px 15px; background: #2962ff; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; transition: background 0.2s;}
+        button:hover { background: #1e4bd8; }
+        #download-btn { background: #26a69a; }
+        #download-btn:hover { background: #1e877c; }
+
+        #status-message { color: #f5a623; font-size: 14px; margin-left: 10px; font-weight: bold; }
+        
+        #data-bar { background-color: #131722; border: 1px solid #1e222d; border-radius: 4px 4px 0 0; padding: 15px 20px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center; }
+        #company-name { font-size: 18px; font-weight: 600; color: #d1d4dc; }
+        .price-metrics { font-family: monospace; font-size: 16px; display: flex; gap: 20px; }
+        .label { color: #787b86; }
+        .val { color: #d1d4dc; font-weight: bold; }
+        #chart-box { height: 500px; border: 1px solid #1e222d; border-top: none; border-radius: 0 0 4px 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Live Candlestick Dashboard</h1>
+        
+        <div class="controls">
+            <div class="search-container">
+                <input type="text" id="ticker-search" placeholder="Search Markets (e.g., BTC-USD, RELIANCE.NS)..." autocomplete="off">
+                <div id="search-results" class="dropdown-list"></div>
+            </div>
+            <button id="fetch-btn">Load Chart</button>
+            <button id="download-btn">⬇ Download 1-Year Data</button>
+            <span id="status-message">Ready.</span>
+        </div>
+
+        <div id="data-bar" style="display: none;">
+            <div id="company-name">Company Name</div>
+            <div class="price-metrics">
+                <div><span class="label">O </span><span class="val" id="val-open">0.00</span></div>
+                <div><span class="label">H </span><span class="val" id="val-high">0.00</span></div>
+                <div><span class="label">L </span><span class="val" id="val-low">0.00</span></div>
+                <div><span class="label">C </span><span class="val" id="val-close">0.00</span></div>
+            </div>
+        </div>
+
+        <div id="chart-box"></div>
+    </div>
+
+    <script>
+        // CUSTOM DIRECTORY: User's Main Companies & Commodities
+        const marketDatabase = [
+            // Cryptocurrencies
+            { ticker: "BTC-USD", name: "Bitcoin", type: "Crypto" },
+            
+            // Indian Indices (Spot Prices - Yahoo Finance does not track Indian Futures)
+            { ticker: "^NSEBANK", name: "Bank Nifty (Spot)", type: "Index" },
+            { ticker: "^BSESN", name: "BSE Sensex (Spot)", type: "Index" },
+            { ticker: "^NSEI", name: "Nifty 50 (Spot)", type: "Index" },
+
+            // Global Commodities (US COMEX/NYMEX Futures)
+            { ticker: "CL=F", name: "Crude Oil", type: "Commodity" },
+            { ticker: "NG=F", name: "Natural Gas", type: "Commodity" },
+            { ticker: "HG=F", name: "Copper", type: "Commodity" },
+            { ticker: "ALI=F", name: "Aluminum", type: "Commodity" },
+            
+            // Indian Equities (Including Zinc/Bio proxies)
+            { ticker: "HINDZINC.NS", name: "Hindustan Zinc", type: "Equity-IN" },
+            { ticker: "BIOCON.NS", name: "Biocon Limited", type: "Equity-IN" },
+            { ticker: "RELIANCE.NS", name: "Reliance Industries", type: "Equity-IN" },
+            { ticker: "HDFCBANK.NS", name: "HDFC Bank", type: "Equity-IN" },
+            
+            // Global Forex
+            { ticker: "USDINR=X", name: "USD to INR", type: "Forex" },
+            { ticker: "EURUSD=X", name: "EUR to USD", type: "Forex" }
+        ];
+
+        const companyDirectory = {};
+        marketDatabase.forEach(item => companyDirectory[item.ticker] = item.name);
+
+        const searchInput = document.getElementById('ticker-search');
+        const searchResults = document.getElementById('search-results');
+        const chartElement = document.getElementById('chart-box');
+        const statusMessage = document.getElementById('status-message');
+        const dataBar = document.getElementById('data-bar');
+        
+        // --- NEW: Global array to safely store our data for hover lookups ---
+        let globalChartData = [];
+        let activeTicker = "BTC-USD"; 
+
+        const chart = LightweightCharts.createChart(chartElement, {
+            layout: { backgroundColor: '#131722', textColor: '#d1d4dc' },
+            grid: { vertLines: { color: '#1e222d' }, horzLines: { color: '#1e222d' } },
+            timeScale: { timeVisible: true, borderColor: '#363c4e' },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+        });
+
+        const candlestickSeries = chart.addCandlestickSeries({
+            upColor: '#26a69a', downColor: '#ef5350', borderVisible: false,
+            wickUpColor: '#26a69a', wickDownColor: '#ef5350'
+        });
+
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase();
+            searchResults.innerHTML = ''; 
+            
+            if (!query) { searchResults.style.display = 'none'; return; }
+
+            let matches = 0;
+            marketDatabase.forEach(item => {
+                if (item.ticker.toLowerCase().includes(query) || item.name.toLowerCase().includes(query)) {
+                    const div = document.createElement('div');
+                    div.className = 'dropdown-item';
+                    div.innerHTML = `
+                        <span class="dropdown-ticker">${item.ticker}</span> 
+                        <span>${item.name}</span>
+                        <span class="dropdown-type">${item.type}</span>
+                    `;
+                    
+                    div.onclick = function() {
+                        searchInput.value = `${item.ticker} - ${item.name}`;
+                        activeTicker = item.ticker;
+                        searchResults.style.display = 'none';
+                        updateChartData(); 
+                    };
+                    
+                    searchResults.appendChild(div);
+                    matches++;
+                }
+            });
+            searchResults.style.display = matches > 0 ? 'block' : 'none';
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.search-container')) {
+                searchResults.style.display = 'none';
+            }
+        });
+
+        function updateMetricsBar(ticker, candleData) {
+            document.getElementById('company-name').innerText = companyDirectory[ticker] || ticker;
+            document.getElementById('val-open').innerText = candleData.open.toFixed(2);
+            document.getElementById('val-high').innerText = candleData.high.toFixed(2);
+            document.getElementById('val-low').innerText = candleData.low.toFixed(2);
+            document.getElementById('val-close').innerText = candleData.close.toFixed(2);
+            
+            const closeColor = candleData.close >= candleData.open ? '#26a69a' : '#ef5350';
+            document.getElementById('val-close').style.color = closeColor;
+        }
+
+        async function updateChartData() {
+            let rawInput = searchInput.value.trim();
+            if (rawInput) {
+                if (rawInput.includes(' - ')) {
+                    activeTicker = rawInput.split(' - ')[0].trim();
+                } else {
+                    activeTicker = rawInput.toUpperCase(); 
+                }
+            }
+
+            statusMessage.innerText = `Fetching ${activeTicker}...`;
+            statusMessage.style.color = "#f5a623"; 
+            
+            try {
+                const response = await fetch(`http://127.0.0.1:5000/api/candles?ticker=${activeTicker}`);
+                if (!response.ok) throw new Error("HTTP Error");
+                const data = await response.json();
+                
+                if(data && data.length > 0) {
+                    globalChartData = data; // Save data to our safe global variable
+                    candlestickSeries.setData(data);
+                    chart.timeScale().fitContent(); 
+                    
+                    dataBar.style.display = 'flex';
+                    updateMetricsBar(activeTicker, data[data.length - 1]);
+
+                    statusMessage.innerText = "Live.";
+                    statusMessage.style.color = "#26a69a"; 
+                } else {
+                    throw new Error("No data");
+                }
+            } catch (error) {
+                statusMessage.innerText = "Error: Symbol not found by Yahoo Finance.";
+                statusMessage.style.color = "#ef5350"; 
+            }
+        }
+
+        // --- THE FIX: Bulletproof direct array lookup for hover data ---
+        chart.subscribeCrosshairMove((param) => {
+            // Check if mouse is actively hovering over a valid time on the chart
+            if (param.time) {
+                // Find the exact candle in our saved array matching the hover timestamp
+                const hoveredCandle = globalChartData.find(candle => candle.time === param.time);
+                if (hoveredCandle) {
+                    updateMetricsBar(activeTicker, hoveredCandle);
+                }
+            } else {
+                // If the mouse moves OFF the chart, safely reset the bar to the last known candle
+                if (globalChartData.length > 0) {
+                    const lastCandle = globalChartData[globalChartData.length - 1];
+                    updateMetricsBar(activeTicker, lastCandle);
+                }
+            }
+        });
+
+        document.getElementById('download-btn').addEventListener('click', async function() {
+            statusMessage.innerText = "Downloading 1-Year Report...";
+            statusMessage.style.color = "#f5a623";
+            try {
+                const response = await fetch(`http://127.0.0.1:5000/api/candles?ticker=${activeTicker}&period=1y`);
+                const data = await response.json();
+                if(!data || data.length === 0) throw new Error("No data");
+
+                const companyName = companyDirectory[activeTicker] || activeTicker;
+                let csvContent = "Company Name,Date,Open,High,Low,Close\n";
+                data.forEach(candle => {
+                    const dateObj = new Date(candle.time * 1000);
+                    const formattedDate = dateObj.toISOString().split('T')[0];
+                    csvContent += `"${companyName}",${formattedDate},${candle.open},${candle.high},${candle.low},${candle.close}\n`;
+                });
+
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement("a");
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", `${activeTicker}_1_Year_Data.csv`);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                statusMessage.innerText = "Download Complete!";
+                statusMessage.style.color = "#26a69a";
+            } catch (error) {
+                statusMessage.innerText = "Failed to download data.";
+                statusMessage.style.color = "#ef5350";
+            }
+        });
+
+        document.getElementById('fetch-btn').addEventListener('click', updateChartData);
+        
+        searchInput.value = "BTC-USD - Bitcoin"; 
+        updateChartData(); 
+    </script>
+</body>
+</html>
